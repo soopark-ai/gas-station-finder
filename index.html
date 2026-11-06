@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전국 주유소 찾기</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<!-- Algolia Autocomplete 클래식 테마 (붙여주신 CSS와 동일한 1.18.1 버전) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@algolia/autocomplete-theme-classic@1.18.1/dist/theme.min.css">
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--text:#1b1f27;--sub:#6b7280;--line:#e5e7eb;--accent:#2563eb;--good:#16a34a;--bad:#dc2626;--cheap:#f59e0b}
+  @media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b1f27;--text:#eef0f4;--sub:#9aa3b2;--line:#2c323d;--accent:#60a5fa;--good:#4ade80;--bad:#f87171}}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column}
+  header{padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+  h1{font-size:18px;margin:0 0 8px}
+  .hero{display:block;width:200px;max-width:100%;height:56px;object-fit:cover;object-position:center 40%;border-radius:8px;margin:0 0 8px}
+  #ac{flex:1;min-width:200px;--aa-search-input-height:36px;--aa-font-size:14px}
+  #ac .aa-Autocomplete{width:100%}
+  .aa-Form{border-radius:8px}
+  .aa-Panel{z-index:10000!important}  /* 지도(Leaflet)보다 위에 표시 */
+  #map{position:relative;z-index:0}   /* Leaflet 내부 z-index(400~)가 바깥으로 새지 않게 격리 */
+  .aa-ItemTitle{font-weight:600}
+  .aa-ItemSub{font-size:12px;color:var(--sub)}
+  .aa-ItemPrice{font-weight:700;white-space:nowrap}
+  /* 헤더 배너: 커서가 지나가며 알약 태그가 계단식으로 쌓이는 반복 애니메이션 */
+  .head-top{display:flex;gap:16px;align-items:stretch}
+  .head-top-left{flex:0 0 auto;max-width:60%}
+  #anim{flex:1;min-width:0;height:104px;position:relative;overflow:hidden}
+  .a-tag{position:absolute;padding:.28em .65em;border-radius:7px;font-weight:600;font-size:11px;white-space:nowrap;will-change:transform,opacity}
+  .a-cur{position:absolute;left:0;top:0;width:20px;height:20px;opacity:0;pointer-events:none;z-index:5;will-change:transform}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .chip{border:1px solid var(--line);background:var(--card);color:var(--text);padding:6px 12px;border-radius:999px;font-size:13px;cursor:pointer}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  select,input[type=search]{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);font-size:13px}
+  input[type=search]{flex:1;min-width:140px}
+  main{flex:1;display:grid;grid-template-columns:400px 1fr;min-height:0}
+  #list{overflow-y:auto;border-right:1px solid var(--line)}
+  #map{height:100%}
+  .item{padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line);cursor:pointer}
+  .item:hover,.item.sel{background:color-mix(in srgb,var(--accent) 10%,var(--card))}
+  .top{display:flex;justify-content:space-between;gap:8px}
+  .name{font-weight:600;font-size:15px}
+  .brand{font-size:11px;color:var(--sub);margin-left:6px;font-weight:400}
+  .price{font-weight:700;font-size:17px;white-space:nowrap}
+  .price small{font-size:11px;color:var(--sub);font-weight:400}
+  .meta{font-size:12px;color:var(--sub);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap}
+  .open{color:var(--good);font-weight:600}.closed{color:var(--bad);font-weight:600}
+  .badge{background:var(--cheap);color:#fff;font-size:10px;padding:1px 6px;border-radius:4px;margin-left:6px}
+  .detail{margin-top:10px;font-size:13px;display:none;border-top:1px dashed var(--line);padding-top:10px}
+  .item.sel .detail{display:block}
+  .detail table{width:100%;border-collapse:collapse}
+  .detail td{padding:2px 0}.detail td:last-child{text-align:right;font-weight:600}
+  .detail a{color:var(--accent);text-decoration:none;font-weight:600}
+  .empty{padding:40px 16px;text-align:center;color:var(--sub)}
+  footer{font-size:11px;color:var(--sub);padding:6px 16px;background:var(--card);border-top:1px solid var(--line)}
+  @media (max-width:760px){main{grid-template-columns:1fr;grid-template-rows:42% 58%}#list{order:2;border-right:0}#map{order:1}}
+</style>
+</head>
+<body>
+<header>
+  <div class="head-top">
+    <div class="head-top-left">
+      <h1>⛽ 전국 주유소 찾기</h1>
+      <img class="hero" src="01.38058021.1.jpg" alt="주유기로 주유하는 모습">
+    </div>
+    <div id="anim" aria-hidden="true"></div>
+  </div>
+  <div class="row" id="fuels"></div>
+  <div class="row" style="margin-top:8px">
+    <div id="ac"></div>
+    <select id="brand"><option value="">전체 브랜드</option></select>
+    <select id="sort"><option value="price">가격 낮은 순</option><option value="dist">가까운 순</option></select>
+    <button class="chip" id="openOnly">영업 중만</button>
+    <button class="chip" id="loc">📍 내 위치</button>
+  </div>
+</header>
+<main>
+  <div id="list"></div>
+  <div id="map"></div>
+</main>
+<footer id="foot"></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@algolia/autocomplete-js@1.18.1/dist/umd/index.production.js"></script>
+<script>
+/* ===== 데이터 계층 =====
+   지금은 샘플 데이터. 실제 연동 시 fetchStations()만 오피넷 API 호출로 교체하면 된다.
+   (오피넷 응답: 상호, 주소, 좌표(KATEC→WGS84 변환 필요), 유종별 가격, 갱신일시)
+   hours: "24h" 또는 [여는시각, 닫는시각] */
+const FUELS = {B027:'휘발유', D047:'경유', B034:'고급휘발유', K015:'LPG'};
+const SAMPLE = [
+ {id:1,name:'강남 셀프주유소',brand:'GS칼텍스',addr:'서울 강남구 테헤란로 152',lat:37.5008,lng:127.0365,hours:'24h',tel:'02-555-0101',p:{B027:1698,D047:1559,B034:1889,K015:1010}},
+ {id:2,name:'서초 에너지',brand:'SK에너지',addr:'서울 서초구 서초대로 301',lat:37.4947,lng:127.0276,hours:['06:00','24:00'],tel:'02-555-0102',p:{B027:1712,D047:1573,B034:1905,K015:1022}},
+ {id:3,name:'마포 알뜰주유소',brand:'알뜰',addr:'서울 마포구 마포대로 89',lat:37.5446,lng:126.9510,hours:['07:00','22:00'],tel:'02-555-0103',p:{B027:1649,D047:1512,B034:1850,K015:985}},
+ {id:4,name:'송파 S-OIL',brand:'S-OIL',addr:'서울 송파구 올림픽로 424',lat:37.5145,lng:127.1059,hours:'24h',tel:'02-555-0104',p:{B027:1689,D047:1549,B034:1879,K015:1005}},
+ {id:5,name:'수원 현대오일뱅크',brand:'현대오일뱅크',addr:'경기 수원시 영통구 광교로 100',lat:37.2860,lng:127.0560,hours:['05:30','23:00'],tel:'031-555-0105',p:{B027:1672,D047:1531,B034:1862,K015:998}},
+ {id:6,name:'성남 NH-OIL',brand:'NH-OIL',addr:'경기 성남시 분당구 판교로 235',lat:37.3947,lng:127.1112,hours:['06:00','22:00'],tel:'031-555-0106',p:{B027:1639,D047:1498,B034:1838,K015:975}},
+ {id:7,name:'인천 송도 주유소',brand:'GS칼텍스',addr:'인천 연수구 송도과학로 32',lat:37.3826,lng:126.6564,hours:'24h',tel:'032-555-0107',p:{B027:1664,D047:1527,B034:1860,K015:990}},
+ {id:8,name:'대전 둔산 주유소',brand:'SK에너지',addr:'대전 서구 둔산대로 117',lat:36.3504,lng:127.3845,hours:['06:00','23:00'],tel:'042-555-0108',p:{B027:1655,D047:1519,B034:1845,K015:982}},
+ {id:9,name:'대구 수성 알뜰',brand:'알뜰',addr:'대구 수성구 달구벌대로 2503',lat:35.8581,lng:128.6311,hours:['07:00','21:00'],tel:'053-555-0109',p:{B027:1621,D047:1488,B034:1822,K015:960}},
+ {id:10,name:'부산 해운대 주유소',brand:'S-OIL',addr:'부산 해운대구 해운대로 570',lat:35.1631,lng:129.1639,hours:'24h',tel:'051-555-0110',p:{B027:1668,D047:1535,B034:1866,K015:992}},
+ {id:11,name:'부산 서면 에너지',brand:'현대오일뱅크',addr:'부산 부산진구 중앙대로 700',lat:35.1579,lng:129.0594,hours:['06:00','24:00'],tel:'051-555-0111',p:{B027:1651,D047:1516,B034:1851,K015:979}},
+ {id:12,name:'광주 상무 주유소',brand:'GS칼텍스',addr:'광주 서구 상무중앙로 110',lat:35.1527,lng:126.8514,hours:['06:30','22:30'],tel:'062-555-0112',p:{B027:1633,D047:1495,B034:1832,K015:970}},
+ {id:13,name:'전주 효자 주유소',brand:'NH-OIL',addr:'전북 전주시 완산구 효자로 120',lat:35.8157,lng:127.1100,hours:['06:00','22:00'],tel:'063-555-0113',p:{B027:1629,D047:1491,B034:1828,K015:965}},
+ {id:14,name:'강릉 경포 주유소',brand:'SK에너지',addr:'강원 강릉시 경포로 365',lat:37.7957,lng:128.9015,hours:['06:00','22:00'],tel:'033-555-0114',p:{B027:1699,D047:1561,B034:1892,K015:1015}},
+ {id:15,name:'제주 노형 주유소',brand:'GS칼텍스',addr:'제주 제주시 노형로 407',lat:33.4859,lng:126.4783,hours:['07:00','23:00'],tel:'064-555-0115',p:{B027:1728,D047:1592,B034:1925,K015:1040}},
+ {id:16,name:'울산 삼산 주유소',brand:'S-OIL',addr:'울산 남구 삼산로 282',lat:35.5384,lng:129.3382,hours:'24h',tel:'052-555-0116',p:{B027:1642,D047:1503,B034:1841,K015:972}},
+];
+async function fetchStations(){ return SAMPLE; }   // ← 오피넷 API로 교체할 지점
+const UPDATED = new Date();                          // 실제 연동 시 API의 갱신 시각 사용
+
+/* ===== 상태 ===== */
+const S = {fuel:'B027', brand:'', q:'', sort:'price', openOnly:false, me:null, sel:null, all:[]};
+
+/* ===== 유틸 ===== */
+const toMin = t => { const [h,m]=t.split(':').map(Number); return h*60+m; };
+function openStatus(h, now=new Date()){
+  if(h==='24h') return {open:true,text:'24시간 영업'};
+  const n=now.getHours()*60+now.getMinutes(), o=toMin(h[0]), c=toMin(h[1]);
+  return {open:n>=o&&n<c, text:`${h[0]} ~ ${h[1]}`};
+}
+function dist(a,b){ const R=6371,r=x=>x*Math.PI/180;
+  const dLa=r(b.lat-a.lat),dLn=r(b.lng-a.lng);
+  const x=Math.sin(dLa/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLn/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x)); }
+const won = n => n.toLocaleString('ko-KR');
+const esc = s => s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ===== 지도 ===== */
+const map = L.map('map').setView([36.5,127.8],7);
+/* 키 없이 file:// 로 열어도 되는 Esri 타일 (OSM은 Referer 없는 접속 차단, CARTO는 API 키 필요) */
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'}).addTo(map);
+const layer = L.layerGroup().addTo(map); let meMarker=null; const markers={};
+
+function priceIcon(price,cheap,sel){
+  const bg = sel ? '#2563eb' : cheap ? '#f59e0b' : '#374151';
+  return L.divIcon({className:'',iconSize:[0,0],html:
+   `<div style="transform:translate(-50%,-100%);background:${bg};color:#fff;padding:3px 7px;border-radius:6px;font:700 12px sans-serif;white-space:nowrap;box-shadow:0 1px 4px #0006">${won(price)}</div>`});
+}
+
+/* ===== 렌더 ===== */
+function filtered(){
+  const q=S.q.trim().toLowerCase();
+  let r=S.all.filter(s=>s.p[S.fuel]!=null
+    && (!S.brand||s.brand===S.brand)
+    && (!q||(s.name+s.addr+s.brand).toLowerCase().includes(q))
+    && (!S.openOnly||openStatus(s.hours).open));
+  r.forEach(s=>s._d=S.me?dist(S.me,s):null);
+  r.sort((a,b)=> S.sort==='dist'&&S.me ? a._d-b._d : a.p[S.fuel]-b.p[S.fuel]);
+  return r;
+}
+function render(){
+  const rows=filtered(), list=document.getElementById('list');
+  layer.clearLayers(); Object.keys(markers).forEach(k=>delete markers[k]);
+  if(!rows.length){ list.innerHTML='<div class="empty">조건에 맞는 주유소가 없습니다.</div>'; return; }
+  const min=Math.min(...rows.map(s=>s.p[S.fuel]));
+  list.innerHTML=rows.map(s=>{
+    const st=openStatus(s.hours), cheap=s.p[S.fuel]===min;
+    return `<div class="item ${S.sel===s.id?'sel':''}" data-id="${s.id}">
+      <div class="top"><div class="name">${esc(s.name)}<span class="brand">${esc(s.brand)}</span>${cheap?'<span class="badge">최저가</span>':''}</div>
+      <div class="price">${won(s.p[S.fuel])}<small>원</small></div></div>
+      <div class="meta"><span class="${st.open?'open':'closed'}">${st.open?'영업 중':'영업 종료'}</span><span>${st.text}</span>${s._d!=null?`<span>${s._d.toFixed(1)}km</span>`:''}</div>
+      <div class="detail"><div>${esc(s.addr)}</div>
+        <table>${Object.entries(FUELS).filter(([k])=>s.p[k]).map(([k,v])=>`<tr><td>${v}</td><td>${won(s.p[k])}원</td></tr>`).join('')}</table>
+        <div style="margin-top:8px"><a href="tel:${s.tel}">📞 ${s.tel}</a> · <a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}">길찾기</a></div></div>
+    </div>`;
+  }).join('');
+  rows.forEach(s=>{
+    const m=L.marker([s.lat,s.lng],{icon:priceIcon(s.p[S.fuel],s.p[S.fuel]===min,S.sel===s.id)}).addTo(layer);
+    m.on('click',()=>select(s.id,true)); markers[s.id]=m;
+  });
+}
+function select(id,scroll){
+  S.sel=id; render();
+  const s=S.all.find(x=>x.id===id); map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),13),{duration:.6});
+  if(scroll) document.querySelector(`.item[data-id="${id}"]`)?.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+
+/* ===== 이벤트 ===== */
+const fuelsEl=document.getElementById('fuels');
+fuelsEl.innerHTML=Object.entries(FUELS).map(([k,v])=>`<button class="chip ${k===S.fuel?'on':''}" data-f="${k}">${v}</button>`).join('');
+fuelsEl.onclick=e=>{ const f=e.target.dataset.f; if(!f) return; S.fuel=f;
+  fuelsEl.querySelectorAll('.chip').forEach(b=>b.classList.toggle('on',b.dataset.f===f)); render(); fit(); };
+document.getElementById('list').onclick=e=>{ const it=e.target.closest('.item'); if(it&&!e.target.closest('a')) select(+it.dataset.id); };
+/* 자동완성 검색창 (Algolia Autocomplete) — 입력하면 목록·지도도 함께 필터링 */
+const { autocomplete } = window['@algolia/autocomplete-js'];
+autocomplete({
+  container:'#ac',
+  placeholder:'주유소명 · 지역 검색',
+  detachedMediaQuery:'none',
+  translations:{clearButtonTitle:'지우기',submitButtonTitle:'검색'},
+  getSources({query}){
+    const k=query.trim().toLowerCase();
+    return [{
+      sourceId:'stations',
+      getItems(){
+        if(!k) return [];
+        return S.all.filter(s=>(s.name+s.addr+s.brand).toLowerCase().includes(k)).slice(0,6);
+      },
+      getItemInputValue:({item})=>item.name,
+      onSelect({item}){ select(item.id,true); },
+      templates:{
+        item({item,html}){
+          return html`<div class="aa-ItemWrapper"><div class="aa-ItemContent"><div class="aa-ItemContentBody">
+            <div class="aa-ItemTitle">${item.name}</div><div class="aa-ItemSub">${item.brand} · ${item.addr}</div>
+            </div></div><div class="aa-ItemPrice">${won(item.p[S.fuel]||0)}원</div></div>`;
+        },
+        noResults({html}){ return html`<div class="aa-SourceNoResults">검색 결과가 없습니다.</div>`; }
+      }
+    }];
+  },
+  onStateChange({state,prevState}){
+    if(state.query!==prevState.query){ S.q=state.query; render(); }
+  }
+});
+/* 클래식 테마는 body.dark 로 다크모드를 전환하므로 시스템 설정과 연동 */
+const mq=matchMedia('(prefers-color-scheme:dark)');
+const syncDark=()=>document.body.classList.toggle('dark',mq.matches);
+syncDark(); mq.addEventListener('change',syncDark);
+brand.onchange=()=>{S.brand=brand.value;render();fit();};
+sort.onchange=()=>{S.sort=sort.value;render();};
+openOnly.onclick=()=>{S.openOnly=!S.openOnly;openOnly.classList.toggle('on',S.openOnly);render();};
+loc.onclick=()=>{
+  if(!navigator.geolocation) return alert('이 브라우저는 위치 기능을 지원하지 않습니다.');
+  loc.textContent='위치 확인 중…';
+  navigator.geolocation.getCurrentPosition(p=>{
+    S.me={lat:p.coords.latitude,lng:p.coords.longitude};
+    S.sort='dist'; sort.value='dist';
+    if(meMarker) meMarker.remove();
+    meMarker=L.circleMarker([S.me.lat,S.me.lng],{radius:8,color:'#fff',weight:2,fillColor:'#2563eb',fillOpacity:1}).addTo(map);
+    map.setView([S.me.lat,S.me.lng],12); loc.textContent='📍 내 위치'; render();
+  },()=>{loc.textContent='📍 내 위치';alert('위치 권한을 허용해 주세요.');},{timeout:8000});
+};
+function fit(){ const r=filtered(); if(r.length) map.fitBounds(r.map(s=>[s.lat,s.lng]),{padding:[40,40],maxZoom:13}); }
+
+/* ===== 헤더 배너 애니메이션 =====
+   커서가 대각선으로 내려가며 지나는 자리마다 색깔 알약 태그가 튀어나와 계단식으로 쌓이고,
+   잠시 머문 뒤 사라지며 다른 태그 묶음으로 계속 반복한다. */
+(function banner(){
+  const host=document.getElementById('anim');
+  if(!host) return;
+  const R='#e11d5a',Y='#f0c94c',B='#0a7cf0',G='#12d28a',P='#7a2cf5',K='#f783c8';
+  const sets=[
+    [['전국 주유소',R,'#fff'],['실시간 가격',Y,'#111'],['최저가',B,'#fff'],['24시간 영업',G,'#111'],['셀프주유',R,'#fff'],['영업시간 확인',K,'#111']],
+    [['내 주변 찾기',P,'#fff'],['휘발유',Y,'#111'],['경유',B,'#fff'],['고급휘발유',G,'#111'],['LPG',R,'#fff'],['알뜰주유소',K,'#111']]
+  ];
+  const xs=[0,.15,.3,.2,.5,.7];                              // 계단의 좌우 흔들림
+  const reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  const STEP=170; let n=0, timers=[];
+  const at=(fn,ms)=>timers.push(setTimeout(fn,ms));
+
+  function play(){
+    timers.forEach(clearTimeout); timers=[];
+    const set=sets[n++%sets.length];
+    host.innerHTML=''; host.style.opacity=1;
+    const Wd=host.clientWidth, H=host.clientHeight;
+    if(Wd<90) return;                                        // 너무 좁으면 생략
+    const stepY=Math.min(18,(H-24)/(set.length-1));
+    const pos=[], nodes=set.map(([t,bg,fg],i)=>{
+      const d=document.createElement('div'); d.className='a-tag'; d.textContent=t;
+      const span=Math.min(220,Math.max(0,Wd-26-100)), x0=Math.max(0,(Wd-26-100-span)/2);   // 넓은 화면에서도 계단이 흩어지지 않게 폭 제한 + 가운데 정렬
+      const left=26+x0+xs[i]*span, top=4+i*stepY; pos.push([left,top]);
+      d.style.cssText=`left:${left}px;top:${top}px;background:${bg};color:${fg};opacity:${reduce?1:0}`;
+      host.append(d); return d;
+    });
+    if(reduce) return;                                       // 동작 줄이기: 정지된 상태로 표시
+    const cur=document.createElement('div'); cur.className='a-cur';
+    cur.innerHTML='<svg viewBox="0 0 34 34" width="20" height="20"><polygon points="5,5 28,13 17,17 13,28" fill="#fff" stroke="#111" stroke-width="2.4" stroke-linejoin="round"/></svg>';
+    host.append(cur);
+    let prev=[pos[0][0]+70,pos[0][1]+60];
+    nodes.forEach((nd,i)=>at(()=>{
+      const to=[pos[i][0]-16,pos[i][1]-14];
+      const rot=Math.atan2(to[1]-prev[1],to[0]-prev[0])*180/Math.PI+135;   // 이동 방향으로 회전
+      cur.animate([{transform:`translate(${prev[0]}px,${prev[1]}px) rotate(${rot}deg)`,opacity:1},
+                   {transform:`translate(${to[0]}px,${to[1]}px) rotate(${rot}deg)`,opacity:1}],
+                  {duration:STEP+40,fill:'forwards',easing:'ease-out'});
+      prev=to;
+      nd.animate([{opacity:0,transform:'translate(24px,18px) scale(.6)'},{opacity:1,transform:'none'}],
+                 {duration:380,fill:'forwards',easing:'cubic-bezier(.2,1.5,.4,1)'});
+    },i*STEP));
+    const endAt=set.length*STEP+380;
+    at(()=>cur.animate([{transform:`translate(${prev[0]}px,${prev[1]}px) rotate(-50deg)`,opacity:1},
+                        {transform:'translate(-6px,-8px) rotate(-20deg)',opacity:1}],
+                       {duration:500,fill:'forwards',easing:'ease-in-out'}),endAt-150);
+    at(()=>host.animate([{opacity:1},{opacity:0}],{duration:450,fill:'forwards'}),endAt+1100);
+    at(play,endAt+1700);                                     // 다음 묶음으로 반복
+  }
+  play();
+})();
+
+/* ===== 시작 ===== */
+(async()=>{
+  S.all=await fetchStations();
+  [...new Set(S.all.map(s=>s.brand))].forEach(b=>brand.insertAdjacentHTML('beforeend',`<option>${b}</option>`));
+  document.getElementById('foot').textContent=`샘플 데이터 · 가격 기준 ${UPDATED.toLocaleString('ko-KR')} · 실제 가격과 다릅니다`;
+  render(); fit();
+})();
+</script>
+</body>
+</html>
